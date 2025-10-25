@@ -54,8 +54,10 @@ pub enum HypercallAddress {
 	#[deprecated = "was never really in use"]
 	/// Port address = `0x700`
 	Netstat = 0x700,
+	#[deprecated = "broken with 64bit memory"]
 	/// Port address = `0x740`
 	Cmdsize = 0x740,
+	#[deprecated = "broken with 64bit memory"]
 	/// Port address = `0x780`
 	Cmdval = 0x780,
 	/// Port address = `0x800`
@@ -69,8 +71,6 @@ pub enum HypercallAddress {
 impl From<Hypercall<'_>> for HypercallAddress {
 	fn from(value: Hypercall) -> Self {
 		match value {
-			Hypercall::Cmdsize(_) => Self::Cmdsize,
-			Hypercall::Cmdval(_) => Self::Cmdval,
 			Hypercall::Exit(_) => Self::Exit,
 			Hypercall::FileClose(_) => Self::FileClose,
 			Hypercall::FileLseek(_) => Self::FileLseek,
@@ -86,8 +86,6 @@ impl From<Hypercall<'_>> for HypercallAddress {
 impl From<&Hypercall<'_>> for HypercallAddress {
 	fn from(value: &Hypercall) -> Self {
 		match value {
-			Hypercall::Cmdsize(_) => Self::Cmdsize,
-			Hypercall::Cmdval(_) => Self::Cmdval,
 			Hypercall::Exit(_) => Self::Exit,
 			Hypercall::FileClose(_) => Self::FileClose,
 			Hypercall::FileLseek(_) => Self::FileLseek,
@@ -105,12 +103,6 @@ impl From<&Hypercall<'_>> for HypercallAddress {
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum Hypercall<'a> {
-	/// Get the size of the argument and environment strings. Used to allocate memory for
-	/// [`Hypercall::Cmdval`].
-	Cmdsize(&'a mut CmdsizeParams),
-	/// Copy the argument and environment strings into the VM. Usually preceeeded by
-	/// [`Hypercall::Cmdsize`] so that the guest can allocate the memory for this call.
-	Cmdval(&'a CmdvalParams),
 	/// Exit the VM and return a status.
 	Exit(&'a ExitParams),
 	FileClose(&'a mut CloseParams),
@@ -135,7 +127,3 @@ impl Hypercall<'_> {
 // Networkports (not used at the moment)
 // TODO: Remove this
 pub const UHYVE_PORT_NETWRITE: u16 = 0x640;
-
-// FIXME: Do not use a fix number of arguments
-/// The maximum number of items in an argument of environment vector.
-pub const MAX_ARGC_ENVC: usize = 128;

@@ -460,23 +460,6 @@ impl VirtualCPU for KvmCpu {
 							}
 
 							match hypercall {
-								Hypercall::Cmdsize(syssize) => syssize.update(
-									&self.kernel_info.path,
-									&self.kernel_info.params.kernel_args,
-								),
-								Hypercall::Cmdval(syscmdval) => {
-									hypercall::copy_argv(
-										self.kernel_info.path.as_os_str(),
-										&self.kernel_info.params.kernel_args,
-										syscmdval,
-										&self.peripherals.mem,
-									);
-									hypercall::copy_env(
-										&self.kernel_info.params.env,
-										syscmdval,
-										&self.peripherals.mem,
-									);
-								}
 								Hypercall::Exit(sysexit) => {
 									return Ok(VcpuStopReason::Exit(sysexit.arg));
 								}

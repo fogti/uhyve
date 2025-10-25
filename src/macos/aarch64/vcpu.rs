@@ -16,7 +16,7 @@ use crate::{
 	consts::{
 		BOOT_INFO_OFFSET, GICD_BASE_ADDRESS, GICR_BASE_ADDRESS, MSI_BASE_ADDRESS, PGT_OFFSET,
 	},
-	hypercall::{self, copy_argv, copy_env},
+	hypercall,
 	params::Params,
 	stats::{CpuStats, VmExit},
 	vcpu::{VcpuStopReason, VirtualCPU},
@@ -277,23 +277,6 @@ impl VirtualCPU for XhyveCpu {
 									}
 									Hypercall::Exit(sysexit) => {
 										return Ok(VcpuStopReason::Exit(sysexit.arg));
-									}
-									Hypercall::Cmdsize(syssize) => syssize.update(
-										&self.kernel_info.path,
-										&self.kernel_info.params.kernel_args,
-									),
-									Hypercall::Cmdval(syscmdval) => {
-										copy_argv(
-											self.kernel_info.path.as_os_str(),
-											&self.kernel_info.params.kernel_args,
-											syscmdval,
-											&self.peripherals.mem,
-										);
-										copy_env(
-											&self.kernel_info.params.env,
-											syscmdval,
-											&self.peripherals.mem,
-										);
 									}
 									Hypercall::FileClose(sysclose) => hypercall::close(
 										sysclose,
