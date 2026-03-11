@@ -33,7 +33,7 @@ use self::{
 	resume::{ResumeMarker, ResumeMode},
 };
 use crate::{
-	HypervisorError,
+	HypervisorError, HypervisorResult,
 	arch::virt_to_phys,
 	linux::PthreadWrapper,
 	vcpu::{VcpuStopReason, VirtualCPU},
@@ -356,5 +356,35 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for Freewhee
 	#[inline(always)]
 	fn support_resume(&mut self) -> Option<target_multithread::MultiThreadResumeOps<'_, Self>> {
 		Some(self)
+	}
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl<Vcpu> VcpuWrapperShared<Vcpu> {
+	pub fn apply_current_guest_debug(&self, breakpoints: &AllBreakpoints) -> HypervisorResult<()> {
+		use kvm_bindings::{
+			KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
+			KVM_GUESTDBG_USE_SW_BP, kvm_guest_debug, kvm_guest_debug_arch,
+		};
+		let debugreg = breakpoints.hard.registers();
+		let mut control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP | KVM_GUESTDBG_USE_HW_BP;
+		// SAFETY: we trust the value of `self.resume.mode`.
+		let mode: ResumeMode =
+			unsafe { core::mem::transmute(self.resume.mode.load(Ordering::Acquire)) };
+		if mode == ResumeMode::Step {
+			control |= KVM_GUESTDBG_SINGLESTEP;
+		}
+		let debug_struct = kvm_guest_debug {
+			control,
+			pad: 0,
+			arch: kvm_guest_debug_arch { debugreg },
+		};
+
+		self.vcpu
+			.read()
+			.unwrap()
+			.get_vcpu()
+			.set_guest_debug(&debug_struct)
+			.map_err(HypervisorError::from)
 	}
 }

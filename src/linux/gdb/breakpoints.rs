@@ -9,6 +9,7 @@ use crate::{
 		virt_to_phys,
 		x86_64::registers::{self, debug::HwBreakpoints},
 	},
+	vcpu::VirtualCPU,
 	vm::VirtualizationBackend,
 };
 
