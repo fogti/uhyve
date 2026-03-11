@@ -48,7 +48,10 @@ fn derive_tid(pthread: libc::pthread_t) -> NonZero<u32> {
 }
 
 impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
-	pub fn spawn_cpu_manager_for_gdb(self, cpu_affinity: Option<Vec<CoreId>>) -> GdbVcpuManager<Vm>
+	pub(crate) fn spawn_cpu_manager_for_gdb(
+		self,
+		cpu_affinity: Option<Vec<CoreId>>,
+	) -> GdbVcpuManager<Vm>
 	where
 		<Vm::BACKEND as VirtualizationBackendInternal>::VCPU: Sync,
 	{
@@ -191,7 +194,7 @@ impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
 
 impl<Vm: VirtualizationBackend> GdbVcpuManager<Vm> {
 	/// Resolves a [`Tid`] from GDB to the associated [`VcpuWrapper`].
-	pub fn get_vcpu_wrapper(
+	fn get_vcpu_wrapper(
 		&self,
 		tid: Tid,
 	) -> &VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
@@ -202,7 +205,7 @@ impl<Vm: VirtualizationBackend> GdbVcpuManager<Vm> {
 	}
 
 	/// Resolves a [`Tid`] from GDB to the associated [`VcpuWrapper`]. Mutable version.
-	pub fn get_vcpu_wrapper_mut(
+	fn get_vcpu_wrapper_mut(
 		&mut self,
 		tid: Tid,
 	) -> &mut VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
@@ -213,7 +216,7 @@ impl<Vm: VirtualizationBackend> GdbVcpuManager<Vm> {
 	}
 
 	/// Resolves a [`Tid`] from GDB to the lock around the associated [`KvmCpu`].
-	pub fn get_vm_cpu(
+	fn get_vm_cpu(
 		&self,
 		tid: Tid,
 	) -> &RwLock<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {

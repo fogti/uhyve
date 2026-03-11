@@ -14,10 +14,10 @@ use crate::{
 impl<Vm: VirtualizationBackend> GdbVcpuManager<Vm> {
 	/// Signal to the vCPU manager that the `gdbstub` finished initializing,
 	/// i.e. exited the `Idle` state and entered the `Running` state.
-	pub fn finished_initializing(&mut self) {
+	pub fn set_finished_initializing(&mut self) {
 		if core::mem::replace(&mut self.is_initializing, false) {
 			for i in &mut self.vcpus {
-				i.free_wheel();
+				i.r#continue();
 			}
 		}
 	}
@@ -31,7 +31,7 @@ impl<Vcpu> VcpuWrapper<Vcpu> {
 	}
 
 	/// Resume the vCPU in free-wheeling / non-stepped mode
-	fn free_wheel(&mut self) {
+	fn r#continue(&mut self) {
 		// TODO: refactor to get rid of mutability
 		let old_planned = self.planned_resume_mode.take();
 		self.apply_resume_mode(ResumeMode::FreeWheeling);
