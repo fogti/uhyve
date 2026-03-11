@@ -1,29 +1,12 @@
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 
-use event_listener::Event;
 use gdbstub::{
 	common::{Signal, Tid},
 	target::ext::base::multithread as target_multithread,
 };
 
 use super::{Freewheel, VcpuWrapper, VcpuWrapperShared};
-use crate::{linux::KickSignal, vm::VirtualizationBackend};
-
-pub(super) struct ResumeMarker {
-	pub(super) mode: AtomicU8,
-	pub(super) event: Event,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ResumeMode {
-	/// The vCPU is stopped (r#continue won't get called while this is set)
-	Stopped,
-	/// The vCPU is single-stepped
-	Step,
-	/// The vCPU is uninterrupt-runnable
-	Freewheel,
-}
+use crate::{gdb::resume::*, linux::KickSignal, vm::VirtualizationBackend};
 
 impl<Vm: VirtualizationBackend> Freewheel<Vm> {
 	pub fn finished_initializing(&mut self) {

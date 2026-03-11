@@ -28,13 +28,11 @@ use nix::sys::pthread::pthread_self;
 use uhyve_interface::GuestVirtAddr;
 use x86_64::registers::debug::Dr6Flags;
 
-use self::{
-	breakpoints::AllBreakpoints,
-	resume::{ResumeMarker, ResumeMode},
-};
+use self::breakpoints::AllBreakpoints;
 use crate::{
 	HypervisorError, HypervisorResult,
 	arch::virt_to_phys,
+	gdb::resume::{ResumeMarker, ResumeMode},
 	linux::PthreadWrapper,
 	vcpu::{VcpuStopReason, VirtualCPU},
 	vm::{
