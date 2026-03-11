@@ -48,7 +48,7 @@ pub(crate) struct VcpuWrapper<VCpu> {
 	pub(crate) planned_resume_mode: Option<ResumeMode>,
 }
 
-pub(crate) struct Freewheel<Vm: VirtualizationBackend> {
+pub(crate) struct GdbVcpuManager<Vm: VirtualizationBackend> {
 	#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 	pub(crate) breakpoints: Arc<RwLock<crate::linux::gdb::breakpoints::AllBreakpoints>>,
 

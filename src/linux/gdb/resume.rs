@@ -6,16 +6,18 @@ use gdbstub::{
 };
 
 use crate::{
-	gdb::{Freewheel, VcpuWrapper, VcpuWrapperShared, resume::*},
+	gdb::{GdbVcpuManager, VcpuWrapper, VcpuWrapperShared, resume::*},
 	linux::KickSignal,
 	vm::VirtualizationBackend,
 };
 
-impl<Vm: VirtualizationBackend> Freewheel<Vm> {
+impl<Vm: VirtualizationBackend> GdbVcpuManager<Vm> {
+	/// Signal to the vCPU manager that the `gdbstub` finished initializing,
+	/// i.e. exited the `Idle` state and entered the `Running` state.
 	pub fn finished_initializing(&mut self) {
 		if core::mem::replace(&mut self.is_initializing, false) {
 			for i in &mut self.vcpus {
-				i.freewheel();
+				i.free_wheel();
 			}
 		}
 	}
@@ -28,11 +30,11 @@ impl<Vcpu> VcpuWrapper<Vcpu> {
 		KickSignal::pthread_kill(self.pthread.0).unwrap();
 	}
 
-	/// Resume the vCPU in Freewheel / non-stepped mode
-	fn freewheel(&mut self) {
+	/// Resume the vCPU in free-wheeling / non-stepped mode
+	fn free_wheel(&mut self) {
 		// TODO: refactor to get rid of mutability
 		let old_planned = self.planned_resume_mode.take();
-		self.apply_resume_mode(ResumeMode::Freewheel);
+		self.apply_resume_mode(ResumeMode::FreeWheeling);
 		self.planned_resume_mode = old_planned;
 	}
 
@@ -61,12 +63,12 @@ impl<Vcpu> VcpuWrapperShared<Vcpu> {
 	}
 }
 
-impl<Vm: VirtualizationBackend> target_multithread::MultiThreadResume for Freewheel<Vm> {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadResume for GdbVcpuManager<Vm> {
 	fn clear_resume_actions(&mut self) -> Result<(), Self::Error> {
 		self.vcpus
 			.iter_mut()
 			.for_each(|i| i.planned_resume_mode = None);
-		self.default_resume_mode = ResumeMode::Freewheel;
+		self.default_resume_mode = ResumeMode::FreeWheeling;
 		Ok(())
 	}
 
@@ -77,10 +79,10 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadResume for Freewh
 	) -> Result<(), Self::Error> {
 		if signal.is_some() {
 			// cannot step with signal
-			return Err(crate::HypervisorError::backend_report_invalid_value());
+			return Err(crate::HypervisorError::backend_invalid_value());
 		}
 
-		self.tid_to_vcpuw_mut(tid).planned_resume_mode = Some(ResumeMode::Freewheel);
+		self.get_vcpu_wrapper_mut(tid).planned_resume_mode = Some(ResumeMode::FreeWheeling);
 
 		Ok(())
 	}
@@ -108,7 +110,7 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadResume for Freewh
 	}
 }
 
-impl<Vm: VirtualizationBackend> target_multithread::MultiThreadSingleStep for Freewheel<Vm> {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadSingleStep for GdbVcpuManager<Vm> {
 	fn set_resume_action_step(
 		&mut self,
 		tid: Tid,
@@ -116,15 +118,17 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadSingleStep for Fr
 	) -> Result<(), Self::Error> {
 		if signal.is_some() {
 			// cannot step with signal
-			return Err(crate::HypervisorError::backend_report_invalid_value());
+			return Err(crate::HypervisorError::backend_invalid_value());
 		}
 
-		self.tid_to_vcpuw_mut(tid).planned_resume_mode = Some(ResumeMode::Step);
+		self.get_vcpu_wrapper_mut(tid).planned_resume_mode = Some(ResumeMode::Step);
 		Ok(())
 	}
 }
 
-impl<Vm: VirtualizationBackend> target_multithread::MultiThreadSchedulerLocking for Freewheel<Vm> {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadSchedulerLocking
+	for GdbVcpuManager<Vm>
+{
 	fn set_resume_action_scheduler_lock(&mut self) -> Result<(), Self::Error> {
 		self.default_resume_mode = ResumeMode::Stopped;
 		Ok(())

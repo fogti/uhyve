@@ -1,9 +1,8 @@
 use gdbstub::target::{self, ext::section_offsets::Offsets};
 
-use super::Freewheel;
-use crate::vm::VirtualizationBackend;
-
-impl<Vm: VirtualizationBackend> target::ext::section_offsets::SectionOffsets for Freewheel<Vm> {
+impl<Vm: crate::vm::VirtualizationBackend> target::ext::section_offsets::SectionOffsets
+	for crate::gdb::GdbVcpuManager<Vm>
+{
 	fn get_section_offsets(&mut self) -> Result<Offsets<u64>, Self::Error> {
 		let offset = self.kernel_info.kernel_address.as_u64();
 		Ok(Offsets::Sections {

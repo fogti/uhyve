@@ -15,5 +15,5 @@ pub enum ResumeMode {
 	/// The vCPU is single-stepped
 	Step,
 	/// The vCPU is uninterrupt-runnable
-	Freewheel,
+	FreeWheeling,
 }

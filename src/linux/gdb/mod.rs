@@ -30,7 +30,7 @@ use crate::{
 	HypervisorError, HypervisorResult,
 	arch::virt_to_phys,
 	gdb::{
-		Freewheel, PthreadWrapper, VcpuWrapper, VcpuWrapperShared,
+		GdbVcpuManager, PthreadWrapper, VcpuWrapper, VcpuWrapperShared,
 		resume::{ResumeMarker, ResumeMode},
 	},
 	vcpu::{VcpuStopReason, VirtualCPU},
@@ -48,7 +48,7 @@ fn derive_tid(pthread: libc::pthread_t) -> NonZero<u32> {
 }
 
 impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
-	pub fn spawn_freewheel_for_gdb(self, cpu_affinity: Option<Vec<CoreId>>) -> Freewheel<Vm>
+	pub fn spawn_cpu_manager_for_gdb(self, cpu_affinity: Option<Vec<CoreId>>) -> GdbVcpuManager<Vm>
 	where
 		<Vm::BACKEND as VirtualizationBackendInternal>::VCPU: Sync,
 	{
@@ -175,7 +175,7 @@ impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
 			.collect();
 		trace!("tid2vcpu = {tid_to_vcpu:?}");
 
-		Freewheel {
+		GdbVcpuManager {
 			breakpoints,
 			peripherals,
 			kernel_info,
@@ -184,13 +184,14 @@ impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
 			tid_to_vcpu,
 
 			is_initializing: true,
-			default_resume_mode: ResumeMode::Freewheel,
+			default_resume_mode: ResumeMode::FreeWheeling,
 		}
 	}
 }
 
-impl<Vm: VirtualizationBackend> Freewheel<Vm> {
-	pub fn tid_to_vcpuw(
+impl<Vm: VirtualizationBackend> GdbVcpuManager<Vm> {
+	/// Resolves a [`Tid`] from GDB to the associated [`VcpuWrapper`].
+	pub fn get_vcpu_wrapper(
 		&self,
 		tid: Tid,
 	) -> &VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
@@ -200,7 +201,8 @@ impl<Vm: VirtualizationBackend> Freewheel<Vm> {
 		}
 	}
 
-	pub fn tid_to_vcpuw_mut(
+	/// Resolves a [`Tid`] from GDB to the associated [`VcpuWrapper`]. Mutable version.
+	pub fn get_vcpu_wrapper_mut(
 		&mut self,
 		tid: Tid,
 	) -> &mut VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
@@ -210,15 +212,16 @@ impl<Vm: VirtualizationBackend> Freewheel<Vm> {
 		}
 	}
 
-	pub fn tid_to_kvm_cpu(
+	/// Resolves a [`Tid`] from GDB to the lock around the associated [`KvmCpu`].
+	pub fn get_vm_cpu(
 		&self,
 		tid: Tid,
 	) -> &RwLock<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
-		&self.tid_to_vcpuw(tid).shared.vcpu
+		&self.get_vcpu_wrapper(tid).shared.vcpu
 	}
 }
 
-impl<Vm: VirtualizationBackend> Target for Freewheel<Vm> {
+impl<Vm: VirtualizationBackend> Target for GdbVcpuManager<Vm> {
 	type Arch = gdbstub_arch::x86::X86_64_SSE;
 	type Error = HypervisorError;
 
@@ -247,14 +250,14 @@ impl<Vm: VirtualizationBackend> Target for Freewheel<Vm> {
 	}
 }
 
-impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for Freewheel<Vm> {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for GdbVcpuManager<Vm> {
 	fn read_registers(&mut self, regs: &mut X86_64CoreRegs, tid: Tid) -> TargetResult<(), Self> {
-		regs::read(self.tid_to_kvm_cpu(tid).read().unwrap().get_vcpu(), regs)
+		regs::read(self.get_vm_cpu(tid).read().unwrap().get_vcpu(), regs)
 			.map_err(|error| TargetError::Errno(error.errno().try_into().unwrap()))
 	}
 
 	fn write_registers(&mut self, regs: &X86_64CoreRegs, tid: Tid) -> TargetResult<(), Self> {
-		regs::write(regs, self.tid_to_kvm_cpu(tid).read().unwrap().get_vcpu())
+		regs::write(regs, self.get_vm_cpu(tid).read().unwrap().get_vcpu())
 			.map_err(|error| TargetError::Errno(error.errno().try_into().unwrap()))
 	}
 
@@ -271,10 +274,7 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for Freewhee
 				virt_to_phys(
 					guest_addr,
 					&self.peripherals.mem,
-					self.tid_to_kvm_cpu(tid)
-						.read()
-						.unwrap()
-						.get_root_pagetable(),
+					self.get_vm_cpu(tid).read().unwrap().get_root_pagetable(),
 				)
 				.map_err(|_| ())?,
 				data.len(),
@@ -292,10 +292,7 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for Freewhee
 				virt_to_phys(
 					GuestVirtAddr::new(start_addr),
 					&self.peripherals.mem,
-					self.tid_to_kvm_cpu(tid)
-						.read()
-						.unwrap()
-						.get_root_pagetable(),
+					self.get_vm_cpu(tid).read().unwrap().get_root_pagetable(),
 				)
 				.map_err(|_err| ())?,
 				data.len(),
@@ -320,7 +317,7 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for Freewhee
 	}
 
 	fn is_thread_alive(&mut self, tid: Tid) -> Result<bool, Self::Error> {
-		Ok(self.is_initializing || !self.tid_to_vcpuw(tid).shared.is_stopped())
+		Ok(self.is_initializing || !self.get_vcpu_wrapper(tid).shared.is_stopped())
 	}
 
 	#[inline(always)]
@@ -330,7 +327,11 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for Freewhee
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-impl<Vcpu> VcpuWrapperShared<Vcpu> {
+impl<Vcpu: VirtualCPU> VcpuWrapperShared<Vcpu> {
+	/// Updates the vCPU debug context to correspond to the currently active
+	/// `ResumeMode`, and `breakpoints`.
+	///
+	/// This handles e.g. single-stepping of the vCPU.
 	pub fn apply_current_guest_debug(&self, breakpoints: &AllBreakpoints) -> HypervisorResult<()> {
 		use kvm_bindings::{
 			KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
