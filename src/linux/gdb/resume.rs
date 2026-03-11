@@ -7,7 +7,7 @@ use gdbstub::{
 };
 
 use super::{Freewheel, VcpuWrapper, VcpuWrapperShared, breakpoints::AllBreakpoints};
-use crate::{HypervisorError, HypervisorResult, linux::KickSignal};
+use crate::{HypervisorError, HypervisorResult, linux::KickSignal, vm::VirtualizationBackend};
 
 pub(super) struct ResumeMarker {
 	pub(super) mode: AtomicU8,
@@ -25,7 +25,7 @@ pub enum ResumeMode {
 	Freewheel,
 }
 
-impl Freewheel {
+impl<Vm: VirtualizationBackend> Freewheel<Vm> {
 	pub fn finished_initializing(&mut self) {
 		if core::mem::replace(&mut self.is_initializing, false) {
 			for i in &mut self.vcpus {
@@ -35,7 +35,7 @@ impl Freewheel {
 	}
 }
 
-impl VcpuWrapper {
+impl<Vcpu> VcpuWrapper<Vcpu> {
 	/// Kick the vCPU
 	pub fn kick(&self) {
 		trace!("vcpu: kick! {}", self.tid);
@@ -66,7 +66,7 @@ impl VcpuWrapper {
 	}
 }
 
-impl VcpuWrapperShared {
+impl<Vcpu> VcpuWrapperShared<Vcpu> {
 	pub fn apply_current_guest_debug(&self, breakpoints: &AllBreakpoints) -> HypervisorResult<()> {
 		use kvm_bindings::{
 			KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
@@ -102,7 +102,7 @@ impl VcpuWrapperShared {
 	}
 }
 
-impl target_multithread::MultiThreadResume for Freewheel {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadResume for Freewheel<Vm> {
 	fn clear_resume_actions(&mut self) -> Result<(), Self::Error> {
 		self.vcpus
 			.iter_mut()
@@ -149,7 +149,7 @@ impl target_multithread::MultiThreadResume for Freewheel {
 	}
 }
 
-impl target_multithread::MultiThreadSingleStep for Freewheel {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadSingleStep for Freewheel<Vm> {
 	fn set_resume_action_step(
 		&mut self,
 		tid: Tid,
@@ -165,7 +165,7 @@ impl target_multithread::MultiThreadSingleStep for Freewheel {
 	}
 }
 
-impl target_multithread::MultiThreadSchedulerLocking for Freewheel {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadSchedulerLocking for Freewheel<Vm> {
 	fn set_resume_action_scheduler_lock(&mut self) -> Result<(), Self::Error> {
 		self.default_resume_mode = ResumeMode::Stopped;
 		Ok(())

@@ -4,9 +4,12 @@ use gdbstub::target::{self, TargetResult, ext::breakpoints::WatchKind};
 use uhyve_interface::GuestVirtAddr;
 
 use super::Freewheel;
-use crate::arch::{
-	virt_to_phys,
-	x86_64::registers::{self, debug::HwBreakpoints},
+use crate::{
+	arch::{
+		virt_to_phys,
+		x86_64::registers::{self, debug::HwBreakpoints},
+	},
+	vm::VirtualizationBackend,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -37,7 +40,7 @@ impl SwBreakpoint {
 
 pub type SwBreakpoints = HashMap<SwBreakpoint, Vec<u8>>;
 
-impl target::ext::breakpoints::Breakpoints for Freewheel {
+impl<Vm: VirtualizationBackend> target::ext::breakpoints::Breakpoints for Freewheel<Vm> {
 	#[inline(always)]
 	fn support_sw_breakpoint(
 		&mut self,
@@ -60,7 +63,7 @@ impl target::ext::breakpoints::Breakpoints for Freewheel {
 	}
 }
 
-impl target::ext::breakpoints::SwBreakpoint for Freewheel {
+impl<Vm: VirtualizationBackend> target::ext::breakpoints::SwBreakpoint for Freewheel<Vm> {
 	fn add_sw_breakpoint(&mut self, addr: u64, kind: usize) -> TargetResult<bool, Self> {
 		let sw_breakpoint = SwBreakpoint::new(addr, kind);
 
@@ -129,7 +132,7 @@ impl target::ext::breakpoints::SwBreakpoint for Freewheel {
 	}
 }
 
-impl target::ext::breakpoints::HwBreakpoint for Freewheel {
+impl<Vm: VirtualizationBackend> target::ext::breakpoints::HwBreakpoint for Freewheel<Vm> {
 	fn add_hw_breakpoint(&mut self, addr: u64, kind: usize) -> TargetResult<bool, Self> {
 		let hw_breakpoint = match registers::debug::HwBreakpoint::new_breakpoint(addr, kind) {
 			Some(hw_breakpoint) => hw_breakpoint,
@@ -163,7 +166,7 @@ impl target::ext::breakpoints::HwBreakpoint for Freewheel {
 	}
 }
 
-impl target::ext::breakpoints::HwWatchpoint for Freewheel {
+impl<Vm: VirtualizationBackend> target::ext::breakpoints::HwWatchpoint for Freewheel<Vm> {
 	fn add_hw_watchpoint(
 		&mut self,
 		addr: u64,

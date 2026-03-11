@@ -35,26 +35,22 @@ use self::{
 use crate::{
 	HypervisorError,
 	arch::virt_to_phys,
-	linux::{
-		PthreadWrapper,
-		x86_64::kvm_cpu::{KvmCpu, KvmVm},
-	},
+	linux::{PthreadWrapper, x86_64::kvm_cpu::KvmCpu},
 	vcpu::{VcpuStopReason, VirtualCPU},
-	vm::{KernelInfo, UhyveVm, VmPeripherals},
+	vm::{
+		KernelInfo, UhyveVm, VirtualizationBackend, VmPeripherals,
+		internal::VirtualizationBackendInternal,
+	},
 };
 
-pub(crate) struct GdbUhyve {
-	pub(crate) vm: UhyveVm<KvmVm>,
-}
-
-pub(crate) struct VcpuWrapperShared {
-	pub(crate) vcpu: RwLock<KvmCpu>,
+pub(crate) struct VcpuWrapperShared<VCpu> {
+	pub(crate) vcpu: RwLock<VCpu>,
 	resume: ResumeMarker,
 }
 
 #[derive(Clone)]
-pub(crate) struct VcpuWrapper {
-	pub(crate) shared: Arc<VcpuWrapperShared>,
+pub(crate) struct VcpuWrapper<VCpu> {
+	pub(crate) shared: Arc<VcpuWrapperShared<VCpu>>,
 	pthread: PthreadWrapper,
 	/// This does look odd, but GDB appears to truncate thread-ids to 32bit
 	tid: NonZero<u32>,
@@ -63,23 +59,17 @@ pub(crate) struct VcpuWrapper {
 }
 
 #[derive(Clone)]
-pub(crate) struct Freewheel {
+pub(crate) struct Freewheel<Vm: VirtualizationBackend> {
 	breakpoints: Arc<RwLock<AllBreakpoints>>,
 	pub(crate) peripherals: Arc<VmPeripherals>,
 	kernel_info: Arc<KernelInfo>,
 	pub(crate) stops: async_channel::Receiver<MultiThreadStopReason<u64>>,
-	pub(crate) vcpus: Vec<VcpuWrapper>,
+	pub(crate) vcpus: Vec<VcpuWrapper<<Vm as VirtualizationBackendInternal>::VCPU>>,
 	/// This does look odd, but GDB appears to truncate thread-ids to 32bit
 	pub(crate) tid_to_vcpu: HashMap<NonZero<u32>, usize>,
 
 	is_initializing: bool,
 	default_resume_mode: ResumeMode,
-}
-
-impl GdbUhyve {
-	pub fn new(vm: UhyveVm<KvmVm>) -> Self {
-		Self { vm }
-	}
 }
 
 /// Compute a thread ID from a pthread ID
@@ -92,8 +82,8 @@ fn derive_tid(pthread: libc::pthread_t) -> NonZero<u32> {
 	NonZero::new((pthread as u32) & !(1u32 << 31)).unwrap()
 }
 
-impl GdbUhyve {
-	pub fn spawn_freewheel(self, cpu_affinity: Option<Vec<CoreId>>) -> Freewheel {
+impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
+	pub fn spawn_freewheel_for_gdb(self, cpu_affinity: Option<Vec<CoreId>>) -> Freewheel<Vm> {
 		use std::os::unix::thread::JoinHandleExt;
 		let Self { vm } = self;
 
@@ -232,7 +222,7 @@ impl GdbUhyve {
 	}
 }
 
-impl Freewheel {
+impl<Vm: VirtualizationBackend> Freewheel<Vm> {
 	pub fn tid_to_vcpuw(&self, tid: Tid) -> &VcpuWrapper {
 		match self.tid_to_vcpu.get(&(tid.try_into().unwrap())) {
 			Some(&vcpu_id) => &self.vcpus[vcpu_id],
@@ -252,7 +242,7 @@ impl Freewheel {
 	}
 }
 
-impl Target for Freewheel {
+impl<Vm: VirtualizationBackend> Target for Freewheel<Vm> {
 	type Arch = gdbstub_arch::x86::X86_64_SSE;
 	type Error = HypervisorError;
 
@@ -281,7 +271,7 @@ impl Target for Freewheel {
 	}
 }
 
-impl target_multithread::MultiThreadBase for Freewheel {
+impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for Freewheel<Vm> {
 	fn read_registers(&mut self, regs: &mut X86_64CoreRegs, tid: Tid) -> TargetResult<(), Self> {
 		regs::read(self.tid_to_kvm_cpu(tid).read().unwrap().get_vcpu(), regs)
 			.map_err(|error| TargetError::Errno(error.errno().try_into().unwrap()))

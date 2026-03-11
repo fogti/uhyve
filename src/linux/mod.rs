@@ -22,7 +22,7 @@ use libc::{SIGRTMAX, SIGRTMIN};
 use nix::sys::pthread::Pthread;
 
 use crate::{
-	linux::{gdb::GdbUhyve, x86_64::kvm_cpu::KvmVm},
+	linux::x86_64::kvm_cpu::KvmVm,
 	serial::Destination,
 	vm::{UhyveVm, VmResult},
 };
@@ -106,7 +106,7 @@ impl UhyveVm<KvmVm> {
 			wait_for_gdb_connection(self.kernel_info.params.gdb_port.unwrap()).unwrap();
 		let debugger = GdbStub::new(connection);
 		// The Uhyve VCPU freewheel thread.
-		let mut freewheel = GdbUhyve::new(self).spawn_freewheel(cpu_affinity);
+		let mut freewheel = self.spawn_freewheel_for_gdb(cpu_affinity);
 
 		let mut gdb = debugger
 			.run_state_machine(&mut freewheel)
