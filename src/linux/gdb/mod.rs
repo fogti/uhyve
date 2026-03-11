@@ -81,7 +81,10 @@ fn derive_tid(pthread: libc::pthread_t) -> NonZero<u32> {
 }
 
 impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
-	pub fn spawn_freewheel_for_gdb(self, cpu_affinity: Option<Vec<CoreId>>) -> Freewheel<Vm> {
+	pub fn spawn_freewheel_for_gdb(self, cpu_affinity: Option<Vec<CoreId>>) -> Freewheel<Vm>
+	where
+		<Vm::BACKEND as VirtualizationBackendInternal>::VCPU: Sync,
+	{
 		use std::os::unix::thread::JoinHandleExt;
 
 		let (stops_s, stops_r) = async_channel::unbounded();
