@@ -9,8 +9,8 @@ use crate::{
 		virt_to_phys,
 		x86_64::registers::{self, debug::HwBreakpoints},
 	},
+	linux::KvmVm,
 	vcpu::VirtualCPU,
-	vm::VirtualizationBackend,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -41,7 +41,7 @@ impl SwBreakpoint {
 
 pub type SwBreakpoints = HashMap<SwBreakpoint, Vec<u8>>;
 
-impl<Vm: VirtualizationBackend> target::ext::breakpoints::Breakpoints for GdbVcpuManager<Vm> {
+impl target::ext::breakpoints::Breakpoints for GdbVcpuManager<KvmVm> {
 	#[inline(always)]
 	fn support_sw_breakpoint(
 		&mut self,
@@ -64,7 +64,7 @@ impl<Vm: VirtualizationBackend> target::ext::breakpoints::Breakpoints for GdbVcp
 	}
 }
 
-impl<Vm: VirtualizationBackend> target::ext::breakpoints::SwBreakpoint for GdbVcpuManager<Vm> {
+impl target::ext::breakpoints::SwBreakpoint for GdbVcpuManager<KvmVm> {
 	fn add_sw_breakpoint(&mut self, addr: u64, kind: usize) -> TargetResult<bool, Self> {
 		let sw_breakpoint = SwBreakpoint::new(addr, kind);
 
@@ -133,7 +133,7 @@ impl<Vm: VirtualizationBackend> target::ext::breakpoints::SwBreakpoint for GdbVc
 	}
 }
 
-impl<Vm: VirtualizationBackend> target::ext::breakpoints::HwBreakpoint for GdbVcpuManager<Vm> {
+impl target::ext::breakpoints::HwBreakpoint for GdbVcpuManager<KvmVm> {
 	fn add_hw_breakpoint(&mut self, addr: u64, kind: usize) -> TargetResult<bool, Self> {
 		let hw_breakpoint = match registers::debug::HwBreakpoint::new_breakpoint(addr, kind) {
 			Some(hw_breakpoint) => hw_breakpoint,
@@ -167,7 +167,7 @@ impl<Vm: VirtualizationBackend> target::ext::breakpoints::HwBreakpoint for GdbVc
 	}
 }
 
-impl<Vm: VirtualizationBackend> target::ext::breakpoints::HwWatchpoint for GdbVcpuManager<Vm> {
+impl target::ext::breakpoints::HwWatchpoint for GdbVcpuManager<KvmVm> {
 	fn add_hw_watchpoint(
 		&mut self,
 		addr: u64,

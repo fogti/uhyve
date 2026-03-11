@@ -1,230 +1,21 @@
 pub(crate) mod breakpoints;
 mod regs;
-mod resume;
 mod section_offsets;
 
-use core::num::NonZero;
-use std::sync::{
-	Arc, RwLock,
-	atomic::{AtomicU8, Ordering},
-};
-
-use async_io::block_on;
-use core_affinity::CoreId;
-use event_listener::{Event, Listener};
 use gdbstub::{
-	common::{Signal, Tid},
-	stub::MultiThreadStopReason,
+	common::Tid,
 	target::{
 		self, Target, TargetError, TargetResult, ext::base::multithread as target_multithread,
 	},
 };
 use gdbstub_arch::x86::reg::X86_64CoreRegs;
-use kvm_bindings::{BP_VECTOR, DB_VECTOR};
-use nix::sys::pthread::pthread_self;
 use uhyve_interface::GuestVirtAddr;
-use x86_64::registers::debug::Dr6Flags;
 
-use self::breakpoints::AllBreakpoints;
 use crate::{
-	HypervisorError, HypervisorResult,
-	arch::virt_to_phys,
-	gdb::{
-		GdbVcpuManager, PthreadWrapper, VcpuWrapper, VcpuWrapperShared,
-		resume::{ResumeMarker, ResumeMode},
-	},
-	vcpu::{VcpuStopReason, VirtualCPU},
-	vm::{UhyveVm, VirtualizationBackend, internal::VirtualizationBackendInternal},
+	HypervisorError, arch::virt_to_phys, gdb::GdbVcpuManager, linux::KvmVm, vcpu::VirtualCPU,
 };
 
-/// Compute a thread ID from a pthread ID
-///
-/// This deals with the particularities of GDB which truncates thread IDs to signed 32bit,
-/// and gdbstub can't deal with negative thread IDs.
-///
-/// Therefore, we truncate to 31bit.
-fn derive_tid(pthread: libc::pthread_t) -> NonZero<u32> {
-	NonZero::new((pthread as u32) & !(1u32 << 31)).unwrap()
-}
-
-impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
-	pub(crate) fn spawn_cpu_manager_for_gdb(
-		self,
-		cpu_affinity: Option<Vec<CoreId>>,
-	) -> GdbVcpuManager<Vm>
-	where
-		<Vm::BACKEND as VirtualizationBackendInternal>::VCPU: Sync,
-	{
-		use std::os::unix::thread::JoinHandleExt;
-
-		let (stops_s, stops_r) = async_channel::unbounded();
-		let peripherals = Arc::clone(&self.peripherals);
-		let kernel_info = Arc::clone(&self.kernel_info);
-		let breakpoints = Arc::new(RwLock::new(AllBreakpoints::new()));
-		let cpu_affinity: Option<Arc<[_]>> = cpu_affinity.map(Arc::from);
-
-		let vcpus = self
-			.vcpus
-			.into_iter()
-			.map(|vcpu| {
-				let vcpu_id = vcpu.get_vcpu_id();
-				let vcpu = RwLock::new(vcpu);
-				let stops_s = stops_s.clone();
-				let breakpoints = Arc::clone(&breakpoints);
-				let shared = Arc::new(VcpuWrapperShared {
-					resume: ResumeMarker {
-						mode: AtomicU8::new(ResumeMode::Stopped as u8),
-						event: Event::new(),
-					},
-					vcpu,
-				});
-				let shared2 = Arc::clone(&shared);
-				let cpu_affinity = cpu_affinity.clone();
-				let join_handle = std::thread::spawn(move || {
-					let tid = derive_tid(pthread_self());
-					let local_cpu_affinity = cpu_affinity
-						.as_ref()
-						.and_then(|core_ids| core_ids.get(vcpu_id).copied());
-
-					match local_cpu_affinity {
-						Some(core_id) => {
-							debug!("Trying to pin thread {} to CPU {}", vcpu_id, core_id.id);
-							core_affinity::set_for_current(core_id); // This does not return an error if it fails :(
-						}
-						None => debug!("No affinity specified, not binding thread"),
-					}
-
-					drop(cpu_affinity);
-
-					shared
-						.vcpu
-						.write()
-						.unwrap()
-						.thread_local_init()
-						.expect("Unable to initialize vCPU");
-
-					loop {
-						loop {
-							if !shared.is_stopped() {
-								break;
-							}
-
-							let listener = shared.resume.event.listen();
-
-							if !shared.is_stopped() {
-								break;
-							}
-
-							listener.wait();
-						}
-						shared
-							.apply_current_guest_debug(&(*breakpoints).read().unwrap())
-							.expect("GDB target error");
-						let stop_reason = match shared
-							.vcpu
-							.try_write()
-							.expect("GDB target lock error")
-							.r#continue()
-							.expect("GDB target error")
-						{
-							VcpuStopReason::Debug(debug) => match debug.exception {
-								DB_VECTOR => {
-									let dr6 = Dr6Flags::from_bits_truncate(debug.dr6);
-									breakpoints
-										.read()
-										.unwrap()
-										.hard
-										.stop_reason(tid.try_into().unwrap(), dr6)
-								}
-								BP_VECTOR => {
-									MultiThreadStopReason::SwBreak(tid.try_into().unwrap())
-								}
-								vector => unreachable!("unknown KVM exception vector: {}", vector),
-							},
-							VcpuStopReason::Exit(code) => {
-								MultiThreadStopReason::Exited(code.try_into().unwrap())
-							}
-							VcpuStopReason::Kick => {
-								trace!("vcpu {} got kicked (recv)", tid);
-								MultiThreadStopReason::SignalWithThread {
-									tid: tid.try_into().unwrap(),
-									signal: Signal::SIGINT,
-								}
-							}
-						};
-						// Make sure that no matter the reason, we have to be explicitly resumed after this
-						// e.g. for breakpoints to work
-						shared
-							.resume
-							.mode
-							.store(ResumeMode::Stopped as u8, Ordering::Release);
-						block_on(stops_s.send(stop_reason)).expect("unable to send info to GDB");
-					}
-				});
-				let pthread = join_handle.as_pthread_t();
-				VcpuWrapper {
-					shared: shared2,
-					pthread: PthreadWrapper(pthread),
-					tid: derive_tid(pthread),
-					planned_resume_mode: None,
-				}
-			})
-			.collect::<Vec<_>>();
-
-		let tid_to_vcpu = vcpus
-			.iter()
-			.enumerate()
-			.map(|(vcpu_id, vcpu)| (vcpu.tid, vcpu_id))
-			.collect();
-		trace!("tid2vcpu = {tid_to_vcpu:?}");
-
-		GdbVcpuManager {
-			breakpoints,
-			peripherals,
-			kernel_info,
-			stops: stops_r,
-			vcpus,
-			tid_to_vcpu,
-
-			is_initializing: true,
-			default_resume_mode: ResumeMode::FreeWheeling,
-		}
-	}
-}
-
-impl<Vm: VirtualizationBackend> GdbVcpuManager<Vm> {
-	/// Resolves a [`Tid`] from GDB to the associated [`VcpuWrapper`].
-	fn get_vcpu_wrapper(
-		&self,
-		tid: Tid,
-	) -> &VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
-		match self.tid_to_vcpu.get(&(tid.try_into().unwrap())) {
-			Some(&vcpu_id) => &self.vcpus[vcpu_id],
-			None => panic!("unable to resolve thread-id from GDB: {tid}"),
-		}
-	}
-
-	/// Resolves a [`Tid`] from GDB to the associated [`VcpuWrapper`]. Mutable version.
-	fn get_vcpu_wrapper_mut(
-		&mut self,
-		tid: Tid,
-	) -> &mut VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
-		match self.tid_to_vcpu.get(&(tid.try_into().unwrap())) {
-			Some(&vcpu_id) => &mut self.vcpus[vcpu_id],
-			None => panic!("unable to resolve thread-id from GDB: {tid}"),
-		}
-	}
-
-	/// Resolves a [`Tid`] from GDB to the lock around the associated [`KvmCpu`].
-	fn get_vm_cpu(
-		&self,
-		tid: Tid,
-	) -> &RwLock<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
-		&self.get_vcpu_wrapper(tid).shared.vcpu
-	}
-}
-
-impl<Vm: VirtualizationBackend> Target for GdbVcpuManager<Vm> {
+impl Target for GdbVcpuManager<KvmVm> {
 	type Arch = gdbstub_arch::x86::X86_64_SSE;
 	type Error = HypervisorError;
 
@@ -253,7 +44,7 @@ impl<Vm: VirtualizationBackend> Target for GdbVcpuManager<Vm> {
 	}
 }
 
-impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for GdbVcpuManager<Vm> {
+impl target_multithread::MultiThreadBase for GdbVcpuManager<KvmVm> {
 	fn read_registers(&mut self, regs: &mut X86_64CoreRegs, tid: Tid) -> TargetResult<(), Self> {
 		regs::read(self.get_vm_cpu(tid).read().unwrap().get_vcpu(), regs)
 			.map_err(|error| TargetError::Errno(error.errno().try_into().unwrap()))
@@ -326,39 +117,5 @@ impl<Vm: VirtualizationBackend> target_multithread::MultiThreadBase for GdbVcpuM
 	#[inline(always)]
 	fn support_resume(&mut self) -> Option<target_multithread::MultiThreadResumeOps<'_, Self>> {
 		Some(self)
-	}
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-impl<Vcpu: VirtualCPU> VcpuWrapperShared<Vcpu> {
-	/// Updates the vCPU debug context to correspond to the currently active
-	/// `ResumeMode`, and `breakpoints`.
-	///
-	/// This handles e.g. single-stepping of the vCPU.
-	pub fn apply_current_guest_debug(&self, breakpoints: &AllBreakpoints) -> HypervisorResult<()> {
-		use kvm_bindings::{
-			KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
-			KVM_GUESTDBG_USE_SW_BP, kvm_guest_debug, kvm_guest_debug_arch,
-		};
-		let debugreg = breakpoints.hard.registers();
-		let mut control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP | KVM_GUESTDBG_USE_HW_BP;
-		// SAFETY: we trust the value of `self.resume.mode`.
-		let mode: ResumeMode =
-			unsafe { core::mem::transmute(self.resume.mode.load(Ordering::Acquire)) };
-		if mode == ResumeMode::Step {
-			control |= KVM_GUESTDBG_SINGLESTEP;
-		}
-		let debug_struct = kvm_guest_debug {
-			control,
-			pad: 0,
-			arch: kvm_guest_debug_arch { debugreg },
-		};
-
-		self.vcpu
-			.read()
-			.unwrap()
-			.get_vcpu()
-			.set_guest_debug(&debug_struct)
-			.map_err(HypervisorError::from)
 	}
 }

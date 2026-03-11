@@ -2,9 +2,9 @@ use std::num::NonZero;
 
 use uhyve_interface::GuestPhysAddr;
 
-use crate::stats::CpuStats;
 /// The trait and fns that a virtual cpu requires
 use crate::{HypervisorResult, os::DebugExitInfo};
+use crate::{gdb::resume::ResumeMode, stats::CpuStats};
 
 /// Reasons for vCPU exits.
 #[cfg_attr(
@@ -29,6 +29,16 @@ pub trait VirtualCPU: Sized + Send {
 
 	/// Start the execution of the CPU. The function will run until it crashes (`Err`) or terminate with an exit code (`Ok`).
 	fn run(&mut self) -> HypervisorResult<(Option<i32>, Option<CpuStats>)>;
+
+	/// Updates the vCPU debug context to correspond to the currently active
+	/// `ResumeMode`, and `breakpoints`.
+	///
+	/// This handles e.g. single-stepping of the vCPU.
+	fn apply_current_guest_debug(
+		&mut self,
+		breakpoints: &crate::os::Breakpoints,
+		resume_mode: ResumeMode,
+	) -> HypervisorResult<()>;
 
 	/// Prints the VCPU's registers to stdout.
 	fn print_registers(&self);

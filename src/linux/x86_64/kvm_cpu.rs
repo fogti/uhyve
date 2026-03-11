@@ -7,8 +7,9 @@ use vmm_sys_util::eventfd::EventFd;
 use x86_64::registers::control::{Cr0Flags, Cr4Flags};
 
 use crate::{
-	HypervisorResult,
+	HypervisorError, HypervisorResult,
 	consts::*,
+	gdb::resume::ResumeMode,
 	hypercall,
 	linux::KVM,
 	params::Params,
@@ -365,10 +366,6 @@ impl KvmCpu {
 		println!("{name}       {seg:?}");
 	}
 
-	pub(crate) fn get_vcpu_id(&self) -> usize {
-		self.id
-	}
-
 	pub(crate) fn get_vcpu(&self) -> &VcpuFd {
 		&self.vcpu
 	}
@@ -594,6 +591,32 @@ impl VirtualCPU for KvmCpu {
 			stats.stop_time_measurement();
 		}
 		Ok((res, self.stats.take()))
+	}
+
+	fn apply_current_guest_debug(
+		&mut self,
+		breakpoints: &crate::linux::gdb::breakpoints::AllBreakpoints,
+		resume_mode: ResumeMode,
+	) -> HypervisorResult<()> {
+		use kvm_bindings::{
+			KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
+			KVM_GUESTDBG_USE_SW_BP, kvm_guest_debug, kvm_guest_debug_arch,
+		};
+		let debugreg = breakpoints.hard.registers();
+		let mut control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP | KVM_GUESTDBG_USE_HW_BP;
+		// SAFETY: we trust the value of `self.resume.mode`.
+		if resume_mode == ResumeMode::Step {
+			control |= KVM_GUESTDBG_SINGLESTEP;
+		}
+		let debug_struct = kvm_guest_debug {
+			control,
+			pad: 0,
+			arch: kvm_guest_debug_arch { debugreg },
+		};
+
+		self.vcpu
+			.set_guest_debug(&debug_struct)
+			.map_err(HypervisorError::from)
 	}
 
 	fn print_registers(&self) {

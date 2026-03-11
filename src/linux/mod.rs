@@ -4,6 +4,7 @@ pub mod x86_64;
 pub(crate) mod gdb;
 
 pub(crate) type DebugExitInfo = kvm_bindings::kvm_debug_exit_arch;
+pub(crate) type Breakpoints = gdb::breakpoints::AllBreakpoints;
 
 use std::{
 	io,
@@ -14,6 +15,7 @@ use std::{
 use async_io::block_on;
 use core_affinity::CoreId;
 use gdbstub::{
+	common::Tid,
 	conn::ConnectionExt,
 	stub::{DisconnectReason, GdbStub, MultiThreadStopReason, state_machine::GdbStubStateMachine},
 };
@@ -216,4 +218,21 @@ fn wait_for_gdb_connection(port: u16) -> io::Result<TcpStream> {
 
 	eprintln!("Debugger connected from {addr}");
 	Ok(stream) // `TcpStream` implements `gdbstub::Connection`
+}
+
+pub(crate) fn debug_info_to_stop_reason(
+	debug: DebugExitInfo,
+	tid: Tid,
+	breakpoints: &Breakpoints,
+) -> MultiThreadStopReason<u64> {
+	use kvm_bindings::{BP_VECTOR, DB_VECTOR};
+	match debug.exception {
+		DB_VECTOR => {
+			use ::x86_64::registers::debug::Dr6Flags;
+			let dr6 = Dr6Flags::from_bits_truncate(debug.dr6);
+			breakpoints.hard.stop_reason(tid, dr6)
+		}
+		BP_VECTOR => MultiThreadStopReason::SwBreak(tid),
+		vector => unreachable!("unknown KVM exception vector: {}", vector),
+	}
 }
