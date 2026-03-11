@@ -35,7 +35,7 @@ use self::{
 use crate::{
 	HypervisorError,
 	arch::virt_to_phys,
-	linux::{PthreadWrapper, x86_64::kvm_cpu::KvmCpu},
+	linux::PthreadWrapper,
 	vcpu::{VcpuStopReason, VirtualCPU},
 	vm::{
 		KernelInfo, UhyveVm, VirtualizationBackend, VmPeripherals,
@@ -48,7 +48,6 @@ pub(crate) struct VcpuWrapperShared<VCpu> {
 	resume: ResumeMarker,
 }
 
-#[derive(Clone)]
 pub(crate) struct VcpuWrapper<VCpu> {
 	pub(crate) shared: Arc<VcpuWrapperShared<VCpu>>,
 	pthread: PthreadWrapper,
@@ -58,7 +57,6 @@ pub(crate) struct VcpuWrapper<VCpu> {
 	planned_resume_mode: Option<ResumeMode>,
 }
 
-#[derive(Clone)]
 pub(crate) struct Freewheel<Vm: VirtualizationBackend> {
 	breakpoints: Arc<RwLock<AllBreakpoints>>,
 	pub(crate) peripherals: Arc<VmPeripherals>,
@@ -85,15 +83,14 @@ fn derive_tid(pthread: libc::pthread_t) -> NonZero<u32> {
 impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
 	pub fn spawn_freewheel_for_gdb(self, cpu_affinity: Option<Vec<CoreId>>) -> Freewheel<Vm> {
 		use std::os::unix::thread::JoinHandleExt;
-		let Self { vm } = self;
 
 		let (stops_s, stops_r) = async_channel::unbounded();
-		let peripherals = Arc::clone(&vm.peripherals);
-		let kernel_info = Arc::clone(&vm.kernel_info);
+		let peripherals = Arc::clone(&self.peripherals);
+		let kernel_info = Arc::clone(&self.kernel_info);
 		let breakpoints = Arc::new(RwLock::new(AllBreakpoints::new()));
 		let cpu_affinity: Option<Arc<[_]>> = cpu_affinity.map(Arc::from);
 
-		let vcpus = vm
+		let vcpus = self
 			.vcpus
 			.into_iter()
 			.map(|vcpu| {
@@ -243,7 +240,10 @@ impl<Vm: VirtualizationBackend> Freewheel<Vm> {
 		}
 	}
 
-	pub fn tid_to_kvm_cpu(&self, tid: Tid) -> &RwLock<KvmCpu> {
+	pub fn tid_to_kvm_cpu(
+		&self,
+		tid: Tid,
+	) -> &RwLock<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
 		&self.tid_to_vcpuw(tid).shared.vcpu
 	}
 }
