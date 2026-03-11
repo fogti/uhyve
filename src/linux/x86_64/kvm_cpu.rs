@@ -381,10 +381,6 @@ impl KvmCpu {
 	pub(crate) fn get_hypercall_data_addr_v2(&self) -> GuestPhysAddr {
 		GuestPhysAddr::new(self.vcpu.sync_regs().regs.rdi)
 	}
-
-	pub fn get_root_pagetable(&self) -> GuestPhysAddr {
-		GuestPhysAddr::new(self.vcpu.get_sregs().unwrap().cr3)
-	}
 }
 
 impl VirtualCPU for KvmCpu {
@@ -660,5 +656,13 @@ impl VirtualCPU for KvmCpu {
 
 	fn get_cpu_frequency(&self) -> Option<NonZero<u32>> {
 		self.vcpu.get_tsc_khz().map(|f| f.try_into().unwrap()).ok()
+	}
+
+	fn get_root_pagetable(&self) -> GuestPhysAddr {
+		GuestPhysAddr::new(self.vcpu.get_sregs().unwrap().cr3)
+	}
+
+	fn get_vcpu_id(&self) -> usize {
+		self.id
 	}
 }

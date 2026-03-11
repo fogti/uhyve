@@ -65,6 +65,8 @@ pub type DefaultBackend = crate::macos::XhyveVm;
 pub(crate) mod internal {
 	use std::sync::Arc;
 
+	use uhyve_interface::GuestPhysAddr;
+
 	use crate::{
 		HypervisorResult,
 		vcpu::VirtualCPU,

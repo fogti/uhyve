@@ -1,5 +1,7 @@
 use std::num::NonZero;
 
+use uhyve_interface::GuestPhysAddr;
+
 use crate::stats::CpuStats;
 /// The trait and fns that a virtual cpu requires
 use crate::{HypervisorResult, os::DebugExitInfo};
@@ -36,4 +38,10 @@ pub trait VirtualCPU: Sized + Send {
 
 	/// Perform thread-local initializations for this vcpu
 	fn thread_local_init(&mut self) -> HypervisorResult<()>;
+
+	/// Get the address to the root page table
+	fn get_root_pagetable(&self) -> GuestPhysAddr;
+
+	/// Get the vCPU ID
+	fn get_vcpu_id(&self) -> usize;
 }
