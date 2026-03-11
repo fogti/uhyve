@@ -1,15 +1,12 @@
-mod breakpoints;
+pub(crate) mod breakpoints;
 mod regs;
 mod resume;
 mod section_offsets;
 
 use core::num::NonZero;
-use std::{
-	collections::HashMap,
-	sync::{
-		Arc, RwLock,
-		atomic::{AtomicU8, Ordering},
-	},
+use std::sync::{
+	Arc, RwLock,
+	atomic::{AtomicU8, Ordering},
 };
 
 use async_io::block_on;
@@ -32,41 +29,13 @@ use self::breakpoints::AllBreakpoints;
 use crate::{
 	HypervisorError, HypervisorResult,
 	arch::virt_to_phys,
-	gdb::resume::{ResumeMarker, ResumeMode},
-	linux::PthreadWrapper,
-	vcpu::{VcpuStopReason, VirtualCPU},
-	vm::{
-		KernelInfo, UhyveVm, VirtualizationBackend, VmPeripherals,
-		internal::VirtualizationBackendInternal,
+	gdb::{
+		Freewheel, PthreadWrapper, VcpuWrapper, VcpuWrapperShared,
+		resume::{ResumeMarker, ResumeMode},
 	},
+	vcpu::{VcpuStopReason, VirtualCPU},
+	vm::{UhyveVm, VirtualizationBackend, internal::VirtualizationBackendInternal},
 };
-
-pub(crate) struct VcpuWrapperShared<VCpu> {
-	pub(crate) vcpu: RwLock<VCpu>,
-	resume: ResumeMarker,
-}
-
-pub(crate) struct VcpuWrapper<VCpu> {
-	pub(crate) shared: Arc<VcpuWrapperShared<VCpu>>,
-	pthread: PthreadWrapper,
-	/// This does look odd, but GDB appears to truncate thread-ids to 32bit
-	tid: NonZero<u32>,
-
-	planned_resume_mode: Option<ResumeMode>,
-}
-
-pub(crate) struct Freewheel<Vm: VirtualizationBackend> {
-	breakpoints: Arc<RwLock<AllBreakpoints>>,
-	pub(crate) peripherals: Arc<VmPeripherals>,
-	kernel_info: Arc<KernelInfo>,
-	pub(crate) stops: async_channel::Receiver<MultiThreadStopReason<u64>>,
-	pub(crate) vcpus: Vec<VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU>>,
-	/// This does look odd, but GDB appears to truncate thread-ids to 32bit
-	pub(crate) tid_to_vcpu: HashMap<NonZero<u32>, usize>,
-
-	is_initializing: bool,
-	default_resume_mode: ResumeMode,
-}
 
 /// Compute a thread ID from a pthread ID
 ///

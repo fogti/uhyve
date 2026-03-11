@@ -5,8 +5,11 @@ use gdbstub::{
 	target::ext::base::multithread as target_multithread,
 };
 
-use super::{Freewheel, VcpuWrapper, VcpuWrapperShared};
-use crate::{gdb::resume::*, linux::KickSignal, vm::VirtualizationBackend};
+use crate::{
+	gdb::{Freewheel, VcpuWrapper, VcpuWrapperShared, resume::*},
+	linux::KickSignal,
+	vm::VirtualizationBackend,
+};
 
 impl<Vm: VirtualizationBackend> Freewheel<Vm> {
 	pub fn finished_initializing(&mut self) {
