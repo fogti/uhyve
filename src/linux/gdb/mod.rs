@@ -64,7 +64,7 @@ pub(crate) struct Freewheel<Vm: VirtualizationBackend> {
 	pub(crate) peripherals: Arc<VmPeripherals>,
 	kernel_info: Arc<KernelInfo>,
 	pub(crate) stops: async_channel::Receiver<MultiThreadStopReason<u64>>,
-	pub(crate) vcpus: Vec<VcpuWrapper<<Vm as VirtualizationBackendInternal>::VCPU>>,
+	pub(crate) vcpus: Vec<VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU>>,
 	/// This does look odd, but GDB appears to truncate thread-ids to 32bit
 	pub(crate) tid_to_vcpu: HashMap<NonZero<u32>, usize>,
 
@@ -223,14 +223,20 @@ impl<Vm: VirtualizationBackend> UhyveVm<Vm> {
 }
 
 impl<Vm: VirtualizationBackend> Freewheel<Vm> {
-	pub fn tid_to_vcpuw(&self, tid: Tid) -> &VcpuWrapper {
+	pub fn tid_to_vcpuw(
+		&self,
+		tid: Tid,
+	) -> &VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
 		match self.tid_to_vcpu.get(&(tid.try_into().unwrap())) {
 			Some(&vcpu_id) => &self.vcpus[vcpu_id],
 			None => panic!("unable to resolve thread-id from GDB: {tid}"),
 		}
 	}
 
-	pub fn tid_to_vcpuw_mut(&mut self, tid: Tid) -> &mut VcpuWrapper {
+	pub fn tid_to_vcpuw_mut(
+		&mut self,
+		tid: Tid,
+	) -> &mut VcpuWrapper<<Vm::BACKEND as VirtualizationBackendInternal>::VCPU> {
 		match self.tid_to_vcpu.get(&(tid.try_into().unwrap())) {
 			Some(&vcpu_id) => &mut self.vcpus[vcpu_id],
 			None => panic!("unable to resolve thread-id from GDB: {tid}"),
