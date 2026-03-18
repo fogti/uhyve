@@ -3,12 +3,12 @@ use std::collections::{HashMap, hash_map::Entry};
 use gdbstub::target::{self, TargetResult, ext::breakpoints::WatchKind};
 use uhyve_interface::GuestVirtAddr;
 
-use super::GdbVcpuManager;
 use crate::{
 	arch::{
 		virt_to_phys,
 		x86_64::registers::{self, debug::HwBreakpoints},
 	},
+	gdb::GdbVcpuManager,
 	linux::KvmVm,
 	vcpu::VirtualCPU,
 };
