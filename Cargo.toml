@@ -1,5 +1,6 @@
 [workspace]
 exclude = ["tests/test-kernels", "hermit-rs", "hermit-rs/*", "kernel"]
+members = ["xtask"]
 
 [package]
 name = "uhyve"
