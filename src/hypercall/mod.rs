@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, num::NonZero};
 
 use uhyve_interface::{GuestPhysAddr, v1, v2};
 
@@ -275,4 +275,10 @@ fn translate_last_errno() -> Option<i32> {
 		io::Error::from_raw_os_error(errno)
 	);
 	None
+}
+
+/// Translates the last error in `errno` to a value suitable to return from the hypercall
+/// (`NonZero<u32>` variant).
+fn translate_last_errno_nonzero() -> Option<NonZero<u32>> {
+	NonZero::new(translate_last_errno()? as u32)
 }

@@ -1,7 +1,5 @@
 //! Parameters for [Hypercalls](crate::v2::Hypercall).
 
-use core::marker::PhantomData;
-
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::GuestPhysAddr;
@@ -127,16 +125,7 @@ pub struct GetdentParams {
 }
 
 /// Result of a [`Mkdir`](crate::v2::Hypercall::Mkdir) hypercall.
-#[derive(Debug, Copy, Clone)]
-#[repr(C)]
-pub enum MkdirResult {
-	/// No result. Guests should set this value before calling the hypercall.
-	None,
-	/// Directory was created.
-	Success,
-	/// Error with libc errno.
-	Error(i32),
-}
+pub type MkdirResult = TristateResult;
 
 /// Parameters for a [`Mkdir`](crate::v2::Hypercall::Mkdir) hypercall.
 #[repr(C)]
@@ -147,7 +136,7 @@ pub struct MkdirParams {
 	/// Length of the path buffer.
 	pub len: u64,
 	/// Return value of the hypercall.
-	pub ret: MkdirResult,
+	pub ret: TaggedNumber<i32, TristateResult>,
 }
 
 /// Which stat-like operation to perform.
@@ -201,16 +190,7 @@ pub struct FileAttr {
 }
 
 /// Result of a [`FileStat`](crate::v2::Hypercall::FileStat) hypercall.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(C)]
-pub enum StatResult {
-	/// No result. Guests should set this value before calling the hypercall.
-	None,
-	/// [`FileAttr`] was written to `attr` on success.
-	Success,
-	/// Error with libc errno.
-	Error(i32),
-}
+pub type StatResult = TristateResult;
 
 /// Parameters for a [`FileStat`](crate::v2::Hypercall::FileStat) hypercall.
 #[repr(C)]
@@ -223,7 +203,7 @@ pub struct StatParams {
 	/// Guest buffer to write the resulting [`FileAttr`] into.
 	pub attr: GuestPhysAddr,
 	/// Return value of the hypercall.
-	pub ret: StatResult,
+	pub ret: TaggedNumber<i32, StatResult>,
 }
 
 /// Parameters for a [`FileFstat`](crate::v2::Hypercall::FileFstat) hypercall.
@@ -235,5 +215,5 @@ pub struct FstatParams {
 	/// Guest buffer to write the resulting [`FileAttr`] into.
 	pub attr: GuestPhysAddr,
 	/// Return value of the hypercall.
-	pub ret: StatResult,
+	pub ret: TaggedNumber<i32, StatResult>,
 }

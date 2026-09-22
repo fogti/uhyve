@@ -281,11 +281,11 @@ fn hypercall_mkdir(dirname: &str) {
 	let mut mkdir_params = MkdirParams {
 		path: path_phys,
 		len: dirname.len() as u64 + 1,
-		ret: MkdirResult::None,
+		ret: MkdirResult::None.try_as_num().unwrap(),
 	};
 	uhyve_hypercall(Hypercall::Mkdir(&mut mkdir_params));
 
-	let MkdirResult::Success = mkdir_params.ret else {
+	let MkdirResult::Success = mkdir_params.ret.into() else {
 		panic!("Mkdir hypercall not successful: {:?}", mkdir_params.ret);
 	};
 
@@ -316,7 +316,7 @@ fn hypercall_stat(filename: &str, mode: StatMode) {
 				name: name_phys,
 				kind: StatKind::Stat,
 				attr: attr_phys,
-				ret: StatResult::None,
+				ret: StatResult::None.try_as_num().unwrap(),
 			};
 			uhyve_hypercall(Hypercall::FileStat(&mut stat_params));
 			stat_params.ret
@@ -327,13 +327,13 @@ fn hypercall_stat(filename: &str, mode: StatMode) {
 			let mut stat_params = FstatParams {
 				fd: file.as_raw_fd(),
 				attr: attr_phys,
-				ret: StatResult::None,
+				ret: StatResult::None.try_as_num().unwrap(),
 			};
 			uhyve_hypercall(Hypercall::FileFstat(&mut stat_params));
 			stat_params.ret
 		}
 	};
-	assert_eq!(ret, StatResult::Success);
+	assert_eq!(ret, StatResult::Success.try_as_num().unwrap());
 	dbg!(&attr);
 	assert_ne!(attr, FileAttr::default());
 	assert_ne!(attr.st_blocks, 0);

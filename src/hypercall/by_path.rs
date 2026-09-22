@@ -2,6 +2,7 @@ use std::{
 	collections::BTreeMap,
 	ffi::{CStr, CString},
 	fs,
+	num::NonZero,
 	os::unix::ffi::OsStrExt,
 	path::Path,
 	sync::Arc,
@@ -13,7 +14,7 @@ use uhyve_interface::{
 };
 
 use crate::{
-	hypercall::translate_last_errno,
+	hypercall::{translate_last_errno, translate_last_errno_nonzero},
 	isolation::{
 		fd::{FdData, UhyveFileDescriptorLayer},
 		filemap::{Directory, Node, NodeStatRef, UhyveFileMap, UhyveMapLeaf},
@@ -201,7 +202,9 @@ pub(super) fn open(mem: &MmapMemory, sysopen: &mut OpenParams, file_map: &mut Uh
 fn host_mkdir(host_path_c: &CString) -> MkdirResult {
 	// SAFETY: `host_path_c` is a valid, null-terminated C string.
 	if unsafe { libc::mkdir(host_path_c.as_ptr(), 0o777) } < 0 {
-		MkdirResult::Error(translate_last_errno().unwrap_or(EIO))
+		MkdirResult::Errno(
+			translate_last_errno_nonzero().unwrap_or_else(|| NonZero::new(EIO as u32).unwrap()),
+		)
 	} else {
 		MkdirResult::Success
 	}
@@ -215,7 +218,9 @@ fn host_mkdir(host_path_c: &CString) -> MkdirResult {
 pub(super) fn mkdir(mem: &MmapMemory, sysmkdir: &mut MkdirParams, file_map: &mut UhyveFileMap) {
 	let Some(guest_path) = (unsafe { decode_guest_path(mem, sysmkdir.path) }) else {
 		error!("The kernel requested to mkdir() a non-UTF8 path: Rejecting...");
-		sysmkdir.ret = MkdirResult::Error(EINVAL);
+		sysmkdir.ret = MkdirResult::Errno(NonZero::new(EINVAL as u32).unwrap())
+			.try_as_num()
+			.unwrap();
 		return;
 	};
 
@@ -227,14 +232,16 @@ pub(super) fn mkdir(mem: &MmapMemory, sysmkdir: &mut MkdirParams, file_map: &mut
 		}
 		Some(UhyveMapLeaf::Virtual(_)) => {
 			debug!("mkdir {guest_path:?}: target is a read-only virtual file, rejecting...");
-			MkdirResult::Error(EROFS)
+			MkdirResult::Errno(NonZero::new(EROFS as u32).unwrap())
 		}
 		None => {
 			debug!("mkdir {guest_path:?}: not mapped, creating a temporary directory...");
 			match file_map.create_temporary_directory(guest_path) {
 				Some(host_path_c) => host_mkdir(&host_path_c),
-				None => MkdirResult::Error(EINVAL),
+				None => MkdirResult::Errno(NonZero::new(EINVAL as u32).unwrap()),
 			}
 		}
-	};
+	}
+	.try_as_num()
+	.unwrap();
 }
