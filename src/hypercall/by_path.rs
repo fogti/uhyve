@@ -9,8 +9,8 @@ use std::{
 };
 
 use uhyve_interface::{
-	GuestPhysAddr,
-	v2::parameters::{FileType, *},
+	GuestPhysAddr, v1,
+	v3::parameters::{FileType, *},
 };
 
 use crate::{
@@ -61,7 +61,11 @@ fn collect_dir_entries(dir: &Directory) -> BTreeMap<Box<str>, FileType> {
 /// Note for when using Landlock: Unlinking files results in them being veiled. If a
 /// file (that existed during initialization) called `log.txt` is unlinked, attempting to
 /// open `log.txt` again will result in an error.
-pub(super) fn unlink(mem: &MmapMemory, sysunlink: &mut UnlinkParams, file_map: &mut UhyveFileMap) {
+pub(super) fn unlink_v1(
+	mem: &MmapMemory,
+	sysunlink: &mut v1::parameters::UnlinkParams,
+	file_map: &mut UhyveFileMap,
+) {
 	let guest_path = if let Some(guest_path) = unsafe { decode_guest_path(mem, sysunlink.name) } {
 		guest_path
 	} else {
@@ -93,8 +97,21 @@ pub(super) fn unlink(mem: &MmapMemory, sysunlink: &mut UnlinkParams, file_map: &
 	};
 }
 
+pub(super) fn unlink(mem: &MmapMemory, sysunlink: &mut UnlinkParams, file_map: &mut UhyveFileMap) {
+	let mut sysunlink_v1 = v1::parameters::UnlinkParams {
+		name: sysunlink.name,
+		ret: sysunlink.ret.num,
+	};
+	unlink_v1(mem, &mut sysunlink_v1, file_map);
+	sysunlink.ret = TaggedNumber::new(sysunlink_v1.ret);
+}
+
 /// Handles an open syscall by opening a file on the host.
-pub(super) fn open(mem: &MmapMemory, sysopen: &mut OpenParams, file_map: &mut UhyveFileMap) {
+pub(super) fn open_v1(
+	mem: &MmapMemory,
+	sysopen: &mut v1::parameters::OpenParams,
+	file_map: &mut UhyveFileMap,
+) {
 	let guest_path = if let Some(guest_path) = unsafe { decode_guest_path(mem, sysopen.name) } {
 		guest_path
 	} else {
@@ -196,6 +213,17 @@ pub(super) fn open(mem: &MmapMemory, sysopen: &mut OpenParams, file_map: &mut Uh
 			-ENOENT
 		}
 	}
+}
+
+pub(super) fn open(mem: &MmapMemory, sysopen: &mut OpenParams, file_map: &mut UhyveFileMap) {
+	let mut sysopen_v1 = v1::parameters::OpenParams {
+		name: sysopen.name,
+		flags: sysopen.flags,
+		mode: sysopen.mode,
+		ret: sysopen.ret.num,
+	};
+	open_v1(mem, &mut sysopen_v1, file_map);
+	sysopen.ret = TaggedNumber::new(sysopen_v1.ret);
 }
 
 /// Attempts `mkdir(host_path)` on the host, mapping the outcome to a [`MkdirResult`].

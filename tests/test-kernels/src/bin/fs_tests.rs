@@ -11,12 +11,12 @@ use std::{
 use hermit as _;
 use uhyve_interface::{
 	GuestVirtAddr,
-	v2::{
+	v3::{
 		Hypercall,
 		parameters::{
 			Dirent64, FileAttr, FileType, FstatParams, GetdentParams, GetdentResult, MkdirParams,
 			MkdirResult, O_DIRECTORY, O_RDONLY, OpenParams, StatKind, StatParams, StatResult,
-			Timespec,
+			Timespec, TaggedNumber,
 		},
 	},
 };
@@ -215,13 +215,13 @@ fn hypercall_getdents(dirname: &str) {
 		name: name_phys,
 		flags: O_RDONLY | O_DIRECTORY,
 		mode: 0,
-		ret: -1,
+		ret: TaggedNumber::new(-1),
 	};
 	uhyve_hypercall(Hypercall::FileOpen(&mut open_params));
 	let fd = open_params.ret; // copy out of packed struct before use
-	assert!(fd >= 0, "FileOpen for directory failed: {fd}");
+	assert!(fd.num > 0, "FileOpen for directory failed: {fd}");
 	// Wrap in File so the fd is closed on drop.
-	let dir = unsafe { File::from_raw_fd(fd) };
+	let dir = unsafe { File::from_raw_fd(fd.num) };
 
 	let buf = [0u8; 1024];
 	let buf_phys = virtual_to_physical(GuestVirtAddr::from_ptr(buf.as_ptr())).unwrap();
@@ -229,11 +229,11 @@ fn hypercall_getdents(dirname: &str) {
 		fd: dir.as_raw_fd(),
 		buf: buf_phys,
 		len: buf.len() as u64,
-		ret: GetdentResult::None,
+		ret: GetdentResult::None.try_as_num().unwrap(),
 	};
 	uhyve_hypercall(Hypercall::Getdents(&mut getdent_params));
 
-	let GetdentResult::Success(buflen) = getdent_params.ret else {
+	let GetdentResult::Success(buflen) = getdent_params.ret.into() else {
 		panic!(
 			"Getdents hypercall not successful: {:?}",
 			getdent_params.ret
@@ -262,7 +262,7 @@ fn hypercall_getdents(dirname: &str) {
 	dirents.push((third_name, third));
 	assert_eq!(
 		first.d_reclen + second.d_reclen + third.d_reclen,
-		buflen as u16
+		buflen.get() as u16
 	);
 	for (entry_name, dirent) in dirents {
 		println!("Directory contains {entry_name}");

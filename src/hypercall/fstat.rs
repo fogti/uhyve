@@ -3,7 +3,7 @@ use std::{
 	os::{fd::RawFd, unix::ffi::OsStrExt},
 };
 
-use uhyve_interface::{GuestPhysAddr, v2::parameters::*};
+use uhyve_interface::{GuestPhysAddr, v3::parameters::*};
 
 use crate::{
 	hypercall::{by_path::decode_guest_path, translate_last_errno_nonzero},
